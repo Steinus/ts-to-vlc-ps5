@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PS5 pad test</title>
+<style>
+  body { margin: 0; padding: 24px; background: #111; color: #eee; font: 28px/1.35 sans-serif; }
+  h1 { font-size: 34px; margin: 0 0 12px; }
+  .ok { color: #6f6; } .bad { color: #f66; }
+  pre { font: 24px/1.3 monospace; margin: 8px 0; white-space: pre-wrap; }
+  #log { height: 46vh; overflow: hidden; border-top: 2px solid #444; padding-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Тест кнопок PS5 (ProsperoWeb)</h1>
+<div id="api"></div>
+<pre id="pads">нажми любую кнопку геймпада…</pre>
+<div>Последняя клавиша: <b id="key">—</b></div>
+<div id="log"></div>
+
+<script>
+(function () {
+  var logEl = document.getElementById('log');
+  var lines = [];
+  function log(t) {
+    lines.unshift(new Date().toLocaleTimeString() + '  ' + t);
+    lines = lines.slice(0, 14);
+    logEl.innerHTML = '<pre>' + lines.join('\n').replace(/</g, '&lt;') + '</pre>';
+  }
+
+  var hasApi = typeof navigator.getGamepads === 'function';
+  document.getElementById('api').innerHTML =
+    'Gamepad API: <b class="' + (hasApi ? 'ok' : 'bad') + '">' + (hasApi ? 'есть' : 'НЕТ') + '</b>';
+
+  window.addEventListener('gamepadconnected', function (e) { log('gamepadconnected: ' + e.gamepad.id); });
+  window.addEventListener('gamepaddisconnected', function () { log('gamepaddisconnected'); });
+
+  window.addEventListener('keydown', function (e) {
+    document.getElementById('key').textContent = e.key + ' (code ' + e.keyCode + ')';
+    log('keydown ' + e.key + ' / ' + e.keyCode);
+  }, true);
+  window.addEventListener('mousedown', function (e) { log('mousedown кнопка ' + e.button + ' @' + e.clientX + ',' + e.clientY); }, true);
+  window.addEventListener('click', function (e) { log('click @' + e.clientX + ',' + e.clientY); }, true);
+  window.addEventListener('wheel', function () { log('wheel'); }, true);
+  window.addEventListener('popstate', function () { log('popstate (назад)'); });
+  window.addEventListener('beforeunload', function () { log('beforeunload (страница закрывается)'); });
+  window.addEventListener('pagehide', function () { log('pagehide'); });
+  document.addEventListener('visibilitychange', function () { log('visibility: ' + document.visibilityState); });
+
+  var prev = {};
+  function poll() {
+    var out = [];
+    var list = hasApi ? (navigator.getGamepads() || []) : [];
+    for (var i = 0; i < list.length; i++) {
+      var g = list[i];
+      if (!g) continue;
+      var pressed = [];
+      for (var b = 0; b < g.buttons.length; b++) {
+        var down = g.buttons[b].pressed || g.buttons[b].value > 0.5;
+        if (down) pressed.push(b);
+        var id = i + ':' + b;
+        if (down !== !!prev[id]) { prev[id] = down; log('pad' + i + ' кнопка ' + b + (down ? ' нажата' : ' отпущена')); }
+      }
+      var axes = [];
+      for (var a = 0; a < g.axes.length; a++) axes.push(g.axes[a].toFixed(2));
+      out.push('pad' + i + ' «' + g.id + '»\n  кнопки: ' + (pressed.join(',') || '—') + '\n  оси: ' + axes.join(' '));
+    }
+    if (out.length) document.getElementById('pads').textContent = out.join('\n');
+    requestAnimationFrame(poll);
+  }
+  requestAnimationFrame(poll);
+  log('страница загружена');
+})();
+</script>
+</body>
+</html>
