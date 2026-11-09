@@ -12,7 +12,7 @@
 
 #include "plugin.h" // generated from plugin.js (plugin_js, plugin_js_len)
 
-#define PORT 8090
+#define PORT 8765
 #define TITLE_ID "PPSA85300"
 #define AUTOPLAY_FILE "/data/homebrew/PPSA85300/autoplay.txt"
 
