@@ -1,20 +1,66 @@
 name: build
+
 on: [push, workflow_dispatch]
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y clang lld xxd unzip curl
+
       - name: Get PS5 payload SDK
         run: |
           curl -L -o sdk.zip https://github.com/ps5-payload-dev/sdk/releases/latest/download/ps5-payload-sdk.zip
           sudo unzip -q sdk.zip -d /opt
           ls /opt
+
       - name: Build
         run: make PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
         with:
           name: vlc-bridge
           path: vlc-bridge.elf
+
+      # The [publish-release] marker publishes the verified first release.
+      # Normal push builds only upload an Actions artifact.
+      - name: Publish release v0.1.0
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[publish-release]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > RELEASE_NOTES.md <<'EOF'
+          ## ts-to-vlc-ps5 v0.1.0
+
+          Первый проверенный выпуск моста Lampa → VLC для PS5.
+
+          - Автоматическая передача HTTP-ссылки из Lampa в VLC 0.6.1 через autoplay.txt
+          - Встроенный плагин Lampa: http://127.0.0.1:8766/lampa.js
+          - HTTP-мост на порту 8766
+          - Успешно протестировано воспроизведение потока TorrServer на PS5
+
+          **Важно:** VLC должен быть установлен по пути `/data/homebrew/PPSA85300/`.
+          На данный момент мост не ищет VLC на USB-накопителях.
+          Сначала полностью закройте VLC, затем запускайте воспроизведение из Lampa.
+
+          Подробная установка и диагностика — в [README](https://github.com/Steinus/ts-to-vlc-ps5#readme).
+
+          **Файл для скачивания:** `vlc-bridge.elf` (прикреплён непосредственно к этому релизу).
+          EOF
+
+          if gh release view v0.1.0 > /dev/null 2>&1; then
+            gh release upload v0.1.0 vlc-bridge.elf --clobber
+          else
+            gh release create v0.1.0 vlc-bridge.elf \
+              --title "ts-to-vlc-ps5 v0.1.0" \
+              --notes-file RELEASE_NOTES.md \
+              --target "$GITHUB_SHA" \
+              --latest
+          fi
