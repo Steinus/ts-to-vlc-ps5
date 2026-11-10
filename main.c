@@ -2,12 +2,15 @@
 // and hands it a stream URL. Also serves the Lampa plugin at /lampa.js.
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "plugin.h" // generated from plugin.js (plugin_js, plugin_js_len)
@@ -27,6 +30,9 @@ typedef struct {
 int sceUserServiceInitialize(void *);
 int sceUserServiceGetForegroundUser(int *);
 int sceSystemServiceLaunchApp(const char *, char **, LaunchAppParam *);
+
+static char last_url[600];
+static time_t last_at;
 
 static void send_resp(int fd, int code, const char *ctype, const char *body,
                       size_t len) {
@@ -100,20 +106,41 @@ static void handle(int fd) {
   } else if (!strncmp(req, "GET /lampa.js", 13)) {
     send_resp(fd, 200, "application/javascript", (const char *)plugin_js,
               plugin_js_len);
+  } else if (!strncmp(req, "GET /status", 11)) {
+    struct stat st;
+    char msg[900];
+    int have = stat(AUTOPLAY_FILE, &st) == 0;
+    int m = snprintf(msg, sizeof(msg),
+                     "bridge ok\nautoplay.txt: %s (size %ld)\nlast request: %ld s ago\nlast url: %s\n",
+                     have ? "STILL THERE" : "gone (VLC took it)",
+                     have ? (long)st.st_size : 0L,
+                     last_at ? (long)(time(NULL) - last_at) : -1L, last_url);
+    send_resp(fd, 200, "text/plain", msg, m);
   } else if (!strncmp(req, "GET /play", 9)) {
     char url[4096];
     if (!get_param(req, "url", url, sizeof(url)) || strncmp(url, "http", 4)) {
       send_resp(fd, 400, "text/plain", "bad url", 7);
       return;
     }
+    char title[512] = "";
+    get_param(req, "title", title, sizeof(title));
+    for (char *c = title; *c; c++)
+      if (*c == '\n' || *c == '\r') *c = ' ';
+    int err = 0, wrote = 0;
     FILE *f = fopen(AUTOPLAY_FILE, "w");
     if (f) {
-      fprintf(f, "%s\n", url);
+      wrote = fprintf(f, "%s\n%s\n", url, title); // line 1: address, line 2: name
       fclose(f);
+      chmod(AUTOPLAY_FILE, 0666); // let the VLC app read and delete it
+    } else {
+      err = errno;
     }
+    snprintf(last_url, sizeof(last_url), "%s", url);
+    last_at = time(NULL);
     int r = launch_vlc();
-    char msg[64];
-    int m = snprintf(msg, sizeof(msg), "launch=%d file=%d", r, f ? 1 : 0);
+    char msg[128];
+    int m = snprintf(msg, sizeof(msg), "launch=%d file=%d bytes=%d errno=%d", r,
+                     f ? 1 : 0, wrote, err);
     send_resp(fd, r == 0 ? 200 : 500, "text/plain", msg, m);
   } else {
     send_resp(fd, 404, "text/plain", "not found", 9);
