@@ -15,7 +15,7 @@
 
 #include "plugin.h" // generated from plugin.js (plugin_js, plugin_js_len)
 
-#define PORT 8765
+#define PORT 8766
 #define TITLE_ID "PPSA85300"
 #define AUTOPLAY_FILE "/data/homebrew/PPSA85300/autoplay.txt"
 
@@ -31,6 +31,7 @@ int sceUserServiceInitialize(void *);
 int sceUserServiceGetForegroundUser(int *);
 int sceSystemServiceLaunchApp(const char *, char **, LaunchAppParam *);
 
+static volatile int quit_flag;
 static char last_url[600];
 static time_t last_at;
 
@@ -106,6 +107,9 @@ static void handle(int fd) {
   } else if (!strncmp(req, "GET /lampa.js", 13)) {
     send_resp(fd, 200, "application/javascript", (const char *)plugin_js,
               plugin_js_len);
+  } else if (!strncmp(req, "GET /quit", 9)) {
+    send_resp(fd, 200, "text/plain", "bye", 3);
+    quit_flag = 1; // a newer copy of the bridge is taking over
   } else if (!strncmp(req, "GET /status", 11)) {
     struct stat st;
     char msg[900];
@@ -147,10 +151,7 @@ static void handle(int fd) {
   }
 }
 
-int main(void) {
-  signal(SIGPIPE, SIG_IGN);
-  sceUserServiceInitialize(0);
-
+static int open_listener(void) {
   int srv = socket(AF_INET, SOCK_STREAM, 0);
   int one = 1;
   setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
@@ -158,12 +159,49 @@ int main(void) {
   a.sin_family = AF_INET;
   a.sin_addr.s_addr = htonl(INADDR_ANY);
   a.sin_port = htons(PORT);
-  if (bind(srv, (struct sockaddr *)&a, sizeof(a)) || listen(srv, 8)) return 1;
+  if (bind(srv, (struct sockaddr *)&a, sizeof(a)) || listen(srv, 8)) {
+    close(srv);
+    return -1;
+  }
+  return srv;
+}
+
+// An older copy of this bridge still holds the port: ask it to quit.
+static void stop_old_copy(void) {
+  int c = socket(AF_INET, SOCK_STREAM, 0);
+  struct sockaddr_in a = {0};
+  a.sin_family = AF_INET;
+  a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  a.sin_port = htons(PORT);
+  if (connect(c, (struct sockaddr *)&a, sizeof(a)) == 0) {
+    const char *q = "GET /quit HTTP/1.0\r\n\r\n";
+    write(c, q, strlen(q));
+    char buf[64];
+    read(c, buf, sizeof(buf));
+  }
+  close(c);
+  usleep(500 * 1000);
+}
+
+int main(void) {
+  signal(SIGPIPE, SIG_IGN);
+  sceUserServiceInitialize(0);
+
+  int srv = open_listener();
+  if (srv < 0) {
+    stop_old_copy();
+    srv = open_listener();
+  }
+  if (srv < 0) return 1;
 
   for (;;) {
     int c = accept(srv, NULL, NULL);
     if (c < 0) continue;
     handle(c);
     close(c);
+    if (quit_flag) {
+      close(srv);
+      return 0;
+    }
   }
 }

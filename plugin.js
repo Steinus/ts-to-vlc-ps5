@@ -1,7 +1,7 @@
 // Lampa plugin: send playback to VLC PS5 through vlc-bridge.
 // Falls back to Lampa's own player if the bridge is not reachable.
 (function () {
-  var BRIDGE = 'http://127.0.0.1:8765';
+  var BRIDGE = 'http://127.0.0.1:8766';
 
   function start() {
     if (window.__vlc_bridge) return;
